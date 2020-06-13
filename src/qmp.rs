@@ -146,6 +146,20 @@ impl Topology {
             None => None,
         }
     }
+
+    pub fn get_task_ids(&self) -> Vec<usize> {
+        let mut task_ids = vec![];
+
+        for (_, cores) in &self.topology {
+            for (_, threads) in cores {
+                for (_, thread) in threads {
+                    task_ids.push(*thread);
+                }
+            }
+        }
+
+        task_ids
+    }
 }
 
 pub fn read_vcpu_info(child: &mut Child) -> Result<Topology, Error> {

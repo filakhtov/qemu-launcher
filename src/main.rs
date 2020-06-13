@@ -26,7 +26,7 @@ fn usage(name: &str) {
     eprintln!("");
 }
 
-fn handle_cpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &config::Config) {
+fn handle_vcpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &config::Config) {
     let vcpu_info = match qmp::read_vcpu_info(child) {
         Ok(vcpu_info) => vcpu_info,
         Err(e) => {
@@ -59,6 +59,45 @@ fn handle_cpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &c
                 "Successfully pinned the vCPU core `{}.{}.{}` with the task ID `{}` to the host CPU `{}`.",
                 pin.0, pin.1, pin.2, task_id, pin.3
             )
+        }
+    }
+
+    if config.has_scheduling() {
+        let scheduler = config.get_scheduler().unwrap();
+        let priority = config.get_priority().unwrap().to_string();
+
+        for task_id in vcpu_info.get_task_ids() {
+            match Command::new("chrt")
+                .arg(format!("--{}", scheduler))
+                .arg("--pid")
+                .arg(&priority)
+                .arg(task_id.to_string())
+                .spawn()
+            {
+                Ok(mut c) => match c.wait() {
+                    Ok(r) => {
+                        if config.is_debug_enabled() && r.success() {
+                            println!(
+                                "vCPU thread `{}` priority successfully changed, scheduler: {}, priority: {}",
+                                task_id,
+                                scheduler,
+                                priority
+                            );
+                        }
+
+                        if !r.success() {
+                            eprintln!(
+                                "Failed to change vCPU thread `{}` priority: `chrt` call failed",
+                                task_id
+                            )
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to change vCPU thread `{}` priority: {}", task_id, e)
+                    }
+                },
+                Err(e) => eprintln!("Failed to change vCPU thread `{}` priority: {}", task_id, e),
+            }
         }
     }
 }
@@ -144,7 +183,7 @@ fn main() {
     };
 
     if config.has_cpu_pinning() {
-        handle_cpu_pinning(&mut child, &mut cpuset, &config);
+        handle_vcpu_pinning(&mut child, &mut cpuset, &config);
     }
 
     match child.wait() {

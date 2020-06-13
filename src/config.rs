@@ -22,6 +22,8 @@ pub struct Config {
     clear_env: bool,
     debug: bool,
     env: HashMap<String, String>,
+    priority: Option<u8>,
+    scheduler: Option<String>,
 }
 
 impl Config {
@@ -38,6 +40,8 @@ impl Config {
                 clear_env: parse_clear_env(&conf)?,
                 debug: parse_debug(&conf)?,
                 env: parse_env(&conf)?,
+                priority: parse_priority(&conf)?,
+                scheduler: parse_scheduler(&conf)?,
             }),
             Err(e) => Err(Error::new(ErrorKind::Other, format!("{}", e))),
         }
@@ -93,6 +97,26 @@ impl Config {
 
     pub fn has_env_vars(&self) -> bool {
         self.env.len() > 0
+    }
+
+    pub fn has_scheduling(&self) -> bool {
+        if let None = self.scheduler {
+            return false;
+        }
+
+        if let None = self.priority {
+            return false;
+        }
+
+        true
+    }
+
+    pub fn get_priority(&self) -> Option<u8> {
+        self.priority.clone()
+    }
+
+    pub fn get_scheduler(&self) -> Option<String> {
+        self.scheduler.clone()
     }
 }
 
@@ -188,6 +212,39 @@ fn parse_group(config: &Vec<Yaml>) -> Option<u32> {
     match config["launcher"]["group"].as_i64() {
         Some(s) => Some(s as u32),
         None => None,
+    }
+}
+
+fn parse_priority(config: &Vec<Yaml>) -> Result<Option<u8>, Error> {
+    let config = &config[0];
+    match config["launcher"]["priority"] {
+        Yaml::Integer(i) => Ok(Some(i as u8)),
+        Yaml::BadValue => Ok(None),
+        _ => Err(Error::new(
+            ErrorKind::Other,
+            format!("Failed to parse `launcher.priority`: integer expected."),
+        )),
+    }
+}
+
+fn parse_scheduler(config: &Vec<Yaml>) -> Result<Option<String>, Error> {
+    let config = &config[0];
+    match &config["launcher"]["scheduler"] {
+        Yaml::String(s) => match s.as_str() {
+            "batch" | "deadline" | "fifo" | "idle" | "other" | "rr" => Ok(Some(s.to_string())),
+            _ => Err(Error::new(
+                ErrorKind::Other,
+                format!(
+                    "Failed to parse `launcher.scheduler`: Expected one of \
+                    `batch`, `deadline`, `fifo`, `idle`, `other` or `rr`."
+                ),
+            )),
+        },
+        Yaml::BadValue => Ok(None),
+        _ => Err(Error::new(
+            ErrorKind::Other,
+            format!("Failed to parse `launcher.scheduler`: string expected."),
+        )),
     }
 }
 

@@ -70,8 +70,13 @@ env:
 - `debug` - boolean, optional, default to `false`. Controls where additional debugging information should be
 printed by the `qemu-launcher`, such as vCPU pinning mapping.
 - `user` - integer, optional. Set an effective user ID that will be used to launch the qemu child process. This can
-be useful when the `qemu-launcher` is executed with elevated priviledges, i.e. when using vCPU pinning feature.
+be useful when the `qemu-launcher` is executed with elevated privileges, i.e. when using vCPU pinning feature.
 - `group` - integer, optional. Same as `user`, but setting the effective group ID for the child process.
+- `priority` - integer, optional. Does not work if the `scheduler` is not specified. Set a priority to be set using
+`chrt` for each of the vCPU threads (requires elevated privileges).
+- `scheduler` - string, optional. Must be one of `batch`, `deadline`, `fifo`, `idle`, `other` or `rr`. Does not
+work if the `priority` option is not specified. Set a policy using the `chrt` for each of the vCPU threads
+(requires elevated privileges).
 - `vcpu_pinning` - hash, optional. Configures how to pin threads responsible for each vCPU core to a logical
 processor of the hypervisor machine. First dimension matches the `socket` of the virtual machine processor, second
 matches the `core` and third matches the `thread`, for example:
@@ -216,6 +221,19 @@ qemu:
 
 First one though is easier to read and understand when compared to others.
 
+## Possible aproaches of handling elevated privileges
+To achieve the best performance possible it is necessary to use vCPU pinning together with custom scheduler and
+higher thread priorities. In order to be able to perform these operations `qemu-launcher` has to be executed with
+elevated privileges.
+
+Simplest way to do so is to execute the `qemu-launcher` binary directly as the `root` user, or using tools like
+`sudo` or `pkexec`. Yet another option is to set the SETUID bit on the binary using `chmod u+s qemu-launcher`
+command.
+
+For most security-conscious users, it is possible to use the pre-mounted `cpuset` tree and allow all users who need
+to execute the `qemu-launcher` an access to modify cpuset entries and allow changing process priorities if
+necessary.
+
 ## How it all works
 For those who are interested in the high level overview of how this tool works, there is a short summary. The
 `qemu-launcher` binary first loads the YAML definition file for the specified virtual machine, compiles the list of
@@ -228,6 +246,10 @@ the list of the qemu process threads responsible for each vCPU socket/core/threa
 check if the cpuset cgroup tree is mounted under the specified mount point, mounting it if it is not, creates a
 separate cpu sets (subdirectories) for each logical core to which threads will be pinned, writes a logical core id
 into the `cpuset.cpus` parameter and finally moves the thread over to that same cpu set.
+
+If the `priority` and the `scheduler` options of the `launcher` configuration section are provided, then the
+application will execute the `chrt` command (see `man chrt(1)`) for each vCPU thread ID, obtained via the QMP
+protocol as described above, passing it the preferred scheduler and the priority parameters.
 
 The application then sits calmly, waiting for the child qemu process to finish and unwinds the changes done to the
 cpu sets.
