@@ -1,7 +1,7 @@
 use proc_mounts::MountIter;
 use std::{
     fs,
-    io::{BufReader, Error, ErrorKind},
+    io::{prelude::*, BufReader, Error, ErrorKind},
     process::Command,
 };
 
@@ -40,12 +40,43 @@ impl CpuSet {
     }
 
     pub fn release_threads(&mut self) -> Result<(), Error> {
+        let mut errors = vec![];
+
         for id in &self.isolated_threads {
-            fs::remove_dir(format!("{}/{}", self.mount_path, id))?;
+            match self.is_thread_free(id) {
+                Ok(None) => match fs::remove_dir(format!("{}/{}", self.mount_path, id)) {
+                    Ok(_) => {}
+                    Err(e) => errors.push(format!("thread {}: {}", id, e)),
+                },
+                Ok(Some(task)) => errors.push(format!(
+                    "thread {}: still busy with at least one task ({})",
+                    id,
+                    task.trim()
+                )),
+                Err(e) => errors.push(format!("thread {}: status unknown, {}", id, e)),
+            }
         }
 
         self.isolated_threads = vec![];
+
+        if errors.len() > 0 {
+            return Err(Error::new(ErrorKind::Other, errors.join("; ")));
+        }
+
         Ok({})
+    }
+
+    fn is_thread_free(&self, id: &usize) -> Result<Option<String>, Error> {
+        let tasks_file = fs::File::open(format!("{}/{}/tasks", self.mount_path, id))?;
+        let mut tasks_reader = BufReader::new(tasks_file);
+        let mut task = String::new();
+        tasks_reader.read_line(&mut task)?;
+
+        if task.len() > 0 {
+            return Ok(Some(task));
+        }
+
+        Ok(None)
     }
 
     fn ensure_mounted(&self) -> Result<(), Error> {

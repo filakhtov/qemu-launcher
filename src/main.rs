@@ -205,6 +205,6 @@ fn main() {
     }
 
     if let Err(e) = cpuset.release_threads() {
-        eprintln!("Failed to release pinned CPU threads: {}", e);
+        eprintln!("Failed to release some pinned CPU threads: {}", e);
     }
 }
