@@ -66,7 +66,12 @@ impl CpuSet {
             return PinResult::Err(e);
         }
 
-        if let Err(e) = fs::write(format!("{}/cpuset.mems", &path), "0") {
+        let mems = match fs::read_to_string(format!("{}/cpuset.mems", self.mount_path)) {
+            Ok(mems) => mems,
+            Err(e) => return PinResult::Err(e),
+        };
+
+        if let Err(e) = fs::write(format!("{}/cpuset.mems", &path), mems) {
             return PinResult::Err(e);
         }
 
