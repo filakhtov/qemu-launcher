@@ -10,6 +10,12 @@ pub struct CpuSet {
     isolated_threads: Vec<usize>,
 }
 
+pub enum PinResult {
+    Ok,
+    Warn(Error),
+    Err(Error),
+}
+
 impl CpuSet {
     pub fn new(path: &str) -> Self {
         CpuSet {
@@ -18,25 +24,63 @@ impl CpuSet {
         }
     }
 
-    pub fn pin_task(&mut self, host_id: usize, guest_id: usize) -> Result<(), Error> {
-        self.isolate_thread(host_id)?;
-        fs::write(
+    pub fn pin_task(&mut self, host_id: usize, guest_id: usize) -> PinResult {
+        let result = self.isolate_thread(host_id);
+
+        if let Err(e) = fs::write(
             format!("{}/{}/tasks", self.mount_path, host_id),
             guest_id.to_string(),
-        )?;
-        Ok({})
+        ) {
+            return PinResult::Err(e);
+        }
+
+        result
     }
 
-    fn isolate_thread(&mut self, id: usize) -> Result<(), Error> {
-        self.ensure_mounted()?;
+    fn isolate_thread(&mut self, id: usize) -> PinResult {
+        if let Err(e) = self.ensure_mounted() {
+            return PinResult::Err(e);
+        }
+
+        let result = match self.is_thread_free(&id) {
+            Ok(None) => PinResult::Ok,
+            Ok(Some(pid)) => PinResult::Warn(Error::new(
+                ErrorKind::Other,
+                format!(
+                    "cpuset `{}` already has at least one task pinned ({})",
+                    id, pid
+                ),
+            )),
+            Err(e) => match e.kind() {
+                ErrorKind::NotFound => PinResult::Ok,
+                _ => return PinResult::Err(e),
+            },
+        };
+
+        if self.isolated_threads.contains(&id) {
+            return result;
+        }
 
         let path = format!("{}/{}", self.mount_path, id);
-        fs::create_dir_all(&path)?;
-        fs::write(format!("{}/cpuset.mems", &path), "0")?;
-        fs::write(format!("{}/cpuset.cpu_exclusive", &path), "1")?;
-        fs::write(format!("{}/cpuset.cpus", &path), id.to_string())?;
+        if let Err(e) = fs::create_dir_all(&path) {
+            return PinResult::Err(e);
+        }
+
+        if let Err(e) = fs::write(format!("{}/cpuset.mems", &path), "0") {
+            return PinResult::Err(e);
+        }
+
+        if let Err(e) = fs::write(format!("{}/cpuset.cpu_exclusive", &path), "1") {
+            return PinResult::Err(e);
+        }
+
+        if let Err(e) = fs::write(format!("{}/cpuset.cpus", &path), id.to_string()) {
+            return PinResult::Err(e);
+        }
+
         self.isolated_threads.push(id);
-        Ok({})
+
+        result
     }
 
     pub fn release_threads(&mut self) -> Result<(), Error> {
@@ -50,8 +94,7 @@ impl CpuSet {
                 },
                 Ok(Some(task)) => errors.push(format!(
                     "thread {}: still busy with at least one task ({})",
-                    id,
-                    task.trim()
+                    id, task
                 )),
                 Err(e) => errors.push(format!("thread {}: status unknown, {}", id, e)),
             }
@@ -72,6 +115,7 @@ impl CpuSet {
         let mut task = String::new();
         tasks_reader.read_line(&mut task)?;
 
+        task = task.trim().to_owned();
         if task.len() > 0 {
             return Ok(Some(task));
         }

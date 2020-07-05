@@ -47,18 +47,23 @@ fn handle_vcpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &
             }
         };
 
-        if let Err(e) = cpuset.pin_task(pin.3, task_id) {
-            eprintln!(
+        match cpuset.pin_task(pin.3, task_id) {
+            cpuset::PinResult::Ok => {
+                if config.is_debug_enabled() {
+                    println!(
+                        "Successfully pinned the vCPU core `{}.{}.{}` with the task ID `{}` to the host CPU `{}`.",
+                        pin.0, pin.1, pin.2, task_id, pin.3
+                    )
+                }
+            }
+            cpuset::PinResult::Warn(e) => eprintln!(
+                "Warning pinning vCPU `{}.{}.{}` with the task ID `{}` to the host CPU `{}`: {}",
+                pin.0, pin.1, pin.2, pin.3, task_id, e
+            ),
+            cpuset::PinResult::Err(e) => eprintln!(
                 "Failed to pin the vCPU `{}.{}.{}` core task ID `{}` to the host CPU `{}`: {}",
                 pin.0, pin.1, pin.2, pin.3, task_id, e
-            );
-        }
-
-        if config.is_debug_enabled() {
-            println!(
-                "Successfully pinned the vCPU core `{}.{}.{}` with the task ID `{}` to the host CPU `{}`.",
-                pin.0, pin.1, pin.2, task_id, pin.3
-            )
+            ),
         }
     }
 
