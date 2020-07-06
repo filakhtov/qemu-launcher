@@ -1,3 +1,5 @@
+extern crate json;
+
 use json::{object, JsonValue};
 use std::{
     collections::HashMap,

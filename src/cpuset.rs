@@ -1,3 +1,5 @@
+extern crate proc_mounts;
+
 use proc_mounts::MountIter;
 use std::{
     fs,
