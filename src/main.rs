@@ -23,6 +23,9 @@ fn usage(name: &str) {
     eprintln!("Supported environment variables:");
     eprintln!("- QEMU_LAUNCHER_CONFIG_DIR - a path to the directory where virtual machine configuration files are stored.");
     eprintln!("- QEMU_LAUNCHER_CPUSET_MOUNT_PATH - a path to the directory where a cpuset cgroup tree will be mounted.");
+    eprintln!("                                    default: /sys/fs/cgroup/cpuset");
+    eprintln!("- QEMU_LAUNCHER_CPUSET_PREFIX - a prefix (directory) under the mount path where qemu cpusets will be created");
+    eprintln!("                                default: qemu");
     eprintln!("");
 }
 
@@ -151,7 +154,20 @@ fn main() {
         None => "/sys/fs/cgroup/cpuset".to_string(),
     };
 
-    let mut cpuset = cpuset::CpuSet::new(&cpuset_mountpoint);
+    let cpuset_prefix = match env::var_os("QEMU_LAUNCHER_CPUSET_PREFIX") {
+        Some(value) => match value.into_string() {
+            Ok(value) => value,
+            Err(_) => {
+                eprintln!(
+                    "Failed to parse the `QEMU_LAUNCHER_CPUSET_PREFIX` environment variable."
+                );
+                return;
+            }
+        },
+        None => "qemu".to_string(),
+    };
+
+    let mut cpuset = cpuset::CpuSet::new(&cpuset_mountpoint, &cpuset_prefix);
 
     let mut command = Command::new(config.get_qemu_binary_path());
     command

@@ -43,7 +43,11 @@ QEMU_LAUNCHER_CONFIG_DIR="/etc/my-vms" qemu-launcher bar
 which will attempt to load the `/etc/my-vms/bar.yml` configuration file. Additionally, when using vCPU pinning in
 the configuration file, `qemu-launcher` will attempt to create the directory, if it does not exist, and mount the
 cpuset cgroup tree under the `/sys/fs/cgroup/cpuset` path. This path can be controlled by setting another
-environment variable - `QEMU_LAUNCHER_CPUSET_MOUNT_PATH`.
+environment variable - `QEMU_LAUNCHER_CPUSET_MOUNT_PATH`. By default, the qemu launcher will create the `qemu`
+prefix subdirectory under the mount path. This can be controlled by the `QEMU_LAUNCHER_CPUSET_PREFIX` environment
+variable. It will then create a `pool` subdirectory inside of the prefix, which will use only non-pinned cores and
+an additional directories will be created for each pinned core as needed. All running tasks are migrated to the
+`pool` cpuset and only the qemu virtual machine vCPU threads are pinned to the core-specific sets.
 
 ## Configuration file format
 All virtual machine configuration files should be stored in a single directory and must use the `.yml` file
@@ -243,9 +247,13 @@ effective user and group IDs for it and manipulating the environment variable as
 If the vCPU pinning is specified, `qemu-launcher` will negotiate capabilities using the QMP protocol (JSON control
 protocol provided by the qemu) using stdio of the child process and execute the `query-cpus-fast` command to obtain
 the list of the qemu process threads responsible for each vCPU socket/core/thread triplet. It will then proceeds to
-check if the cpuset cgroup tree is mounted under the specified mount point, mounting it if it is not, creates a
-separate cpu sets (subdirectories) for each logical core to which threads will be pinned, writes a logical core id
-into the `cpuset.cpus` parameter and finally moves the thread over to that same cpu set.
+check if the cpuset cgroup tree is mounted under the specified mount point, mounting it if it is not. Next the a
+prefix (`qemu` by default) directory where all cpusets will be hosted is created and all cores available on the
+hypervisor are allocated to this prefix. The `pool` directory is created, representing a pool of available
+(non-pinned) host CPU threads and all currently running tasks are moved into this new `pool` cpuset. Then a
+separate cpu sets (subdirectories) for each logical core to which threads will be pinned are created and respective
+logical core id is removed from the `pool` cpu set and written into the cpu set dedicated for this core, and
+finally moves the vCPU thread over to the newly created cpu set to shield it from other tasks.
 
 If the `priority` and the `scheduler` options of the `launcher` configuration section are provided, then the
 application will execute the `chrt` command (see `man chrt(1)`) for each vCPU thread ID, obtained via the QMP
