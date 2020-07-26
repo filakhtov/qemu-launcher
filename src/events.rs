@@ -42,3 +42,31 @@ impl EventEmitter for EventDispatcher {
         return self.listeners.get(&TypeId::of::<E>());
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::{Event, EventDispatcher, EventEmitter};
+
+    struct TestEvent {}
+    impl Event<TestEvent> for TestEvent {}
+
+    struct EventWithNoListeners {}
+    impl Event<EventWithNoListeners> for EventWithNoListeners {}
+
+    #[test]
+    fn event_dispatcher_notifies_appropriate_event_listeners() {
+        let mut event_dispatcher = EventDispatcher::new();
+        static mut TEST_EVENT_COUNT: u8 = 0;
+
+        event_dispatcher.add_listener(|_event: &TestEvent| unsafe {
+            TEST_EVENT_COUNT += 1;
+        });
+
+        event_dispatcher.trigger(&TestEvent {});
+        event_dispatcher.trigger(&EventWithNoListeners {});
+
+        unsafe {
+            assert_eq!(1, TEST_EVENT_COUNT);
+        }
+    }
+}
