@@ -1,6 +1,12 @@
-use std::io::{Error, ErrorKind};
+use std::{
+    io::{Error, ErrorKind},
+    path::Path,
+};
+
+const PROGRAM_NAME: &str = "qemu-launcher";
 
 pub struct Arguments {
+    program_name: String,
     debug: bool,
     show_usage: bool,
     machine_name: String,
@@ -24,14 +30,31 @@ impl Arguments {
         &self.machine_name
     }
 
+    pub fn get_program_name(&self) -> &str {
+        &self.program_name
+    }
+
     pub fn new(arguments: &Vec<String>) -> Result<Self, Error> {
+        if arguments.len() < 1 {
+            return Err(Error::new(ErrorKind::InvalidInput, "Empty arguments."));
+        }
+
+        let program_name = match Path::new(&arguments[0]).file_name() {
+            Some(name) => match name.to_str() {
+                Some(name) => name,
+                None => PROGRAM_NAME,
+            },
+            None => PROGRAM_NAME,
+        }
+        .to_owned();
+
         let mut verbose = false;
         let mut debug = false;
         let mut machine_name = String::new();
         let mut usage = false;
         let mut has_machine_name = false;
 
-        for argument in arguments {
+        for argument in &arguments[1..] {
             match argument.as_str() {
                 "-v" => {
                     verbose = true;
@@ -55,6 +78,7 @@ impl Arguments {
 
         if usage {
             return Ok(Self {
+                program_name: program_name,
                 verbose: false,
                 debug: false,
                 show_usage: true,
@@ -72,6 +96,7 @@ impl Arguments {
         validate_machine_name(&machine_name)?;
 
         Ok(Self {
+            program_name: program_name,
             verbose: verbose,
             debug: debug,
             show_usage: usage,
@@ -112,11 +137,8 @@ mod test {
 
     #[test]
     fn arguments_accepts_machine_name() {
-        let result = Arguments::new(&vec![String::from("my-vm")]);
-
-        assert!(result.is_ok(), "Failed to parse arguments");
-
-        let arguments = result.unwrap();
+        let arguments =
+            Arguments::new(&vec![String::from("launcher"), String::from("my-vm")]).unwrap();
 
         assert!(
             !arguments.is_verbose_mode(),
@@ -131,15 +153,17 @@ mod test {
             "Show usage is enabled without `-h` flag"
         );
         assert_eq!("my-vm", arguments.get_machine_name());
+        assert_eq!("launcher", arguments.get_program_name());
     }
 
     #[test]
     fn arguments_accepts_verbose_flag() {
-        let result = Arguments::new(&vec![String::from("-v"), String::from("verbose-vm")]);
-
-        assert!(result.is_ok(), "Failed to parse arguments");
-
-        let arguments = result.unwrap();
+        let arguments = Arguments::new(&vec![
+            String::from("launcher"),
+            String::from("-v"),
+            String::from("verbose-vm"),
+        ])
+        .unwrap();
 
         assert!(
             arguments.is_verbose_mode(),
@@ -149,11 +173,12 @@ mod test {
 
     #[test]
     fn arguments_accepts_debug_flag() {
-        let result = Arguments::new(&vec![String::from("-d"), String::from("debug-vm")]);
-
-        assert!(result.is_ok(), "Failed to parse arguments");
-
-        let arguments = result.unwrap();
+        let arguments = Arguments::new(&vec![
+            String::from("launcher"),
+            String::from("-d"),
+            String::from("debug-vm"),
+        ])
+        .unwrap();
 
         assert!(
             arguments.is_verbose_mode(),
@@ -167,17 +192,15 @@ mod test {
 
     #[test]
     fn arguments_ignores_duplicate_flags() {
-        let result = Arguments::new(&vec![
+        let arguments = Arguments::new(&vec![
+            String::from("launcher"),
             String::from("-v"),
             String::from("debug-vm"),
             String::from("-v"),
             String::from("-d"),
             String::from("-d"),
-        ]);
-
-        assert!(result.is_ok(), "Failed to parse arguments");
-
-        let arguments = result.unwrap();
+        ])
+        .unwrap();
 
         assert!(
             arguments.is_verbose_mode(),
@@ -190,25 +213,31 @@ mod test {
     }
 
     #[test]
-    fn arguments_reports_missing_machine_name() {
+    fn arguments_reports_empty_arguments() {
         let result = Arguments::new(&vec![]);
+
+        assert_result_is_error(result, ErrorKind::InvalidInput, "Empty arguments.");
+    }
+
+    #[test]
+    fn arguments_reports_missing_machine_name() {
+        let result = Arguments::new(&vec![String::from("qemu")]);
 
         assert_result_is_error(result, ErrorKind::Other, "Missing virtual machine name.");
     }
 
     #[test]
     fn arguments_discards_all_arguments_if_help_is_requested() {
-        let result = Arguments::new(&vec![
+        let arguments = Arguments::new(&vec![
+            String::from("launcher"),
             String::from("-v"),
             String::from("-d"),
             String::from("-h"),
             String::from("debug-vm"),
-        ]);
+        ])
+        .unwrap();
 
-        assert!(result.is_ok(), "Failed to parse arguments");
-
-        let arguments = result.unwrap();
-
+        assert_eq!("launcher", arguments.get_program_name());
         assert!(
             !arguments.is_verbose_mode(),
             "Verbose mode is enabled with `-h` flag"
@@ -226,19 +255,30 @@ mod test {
 
     #[test]
     fn arguments_reports_too_many_arguments() {
-        let result = Arguments::new(&vec![String::from("my-vm"), String::from("your-vm")]);
+        let result = Arguments::new(&vec![
+            String::from("launcher"),
+            String::from("my-vm"),
+            String::from("your-vm"),
+        ]);
 
         assert_result_is_error(result, ErrorKind::Other, "Too many parameters.");
     }
 
     #[test]
     fn arguments_reports_error_if_machine_name_contains_wrong_characters() {
-        let result = Arguments::new(&vec![String::from("my-vm\0")]);
+        let result = Arguments::new(&vec![String::from("launcher"), String::from("my-vm\0")]);
 
         assert_result_is_error(
             result,
             ErrorKind::InvalidInput,
             "Machine name contains invalid characters.",
         );
+    }
+
+    #[test]
+    fn arguments_uses_default_program_name_if_missing_from_input() {
+        let arguments = Arguments::new(&vec![String::from(""), String::from("myvm")]).unwrap();
+
+        assert_eq!(super::PROGRAM_NAME, arguments.get_program_name());
     }
 }
