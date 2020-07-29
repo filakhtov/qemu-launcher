@@ -3,20 +3,11 @@ use std::{any::TypeId, collections::HashMap, mem::transmute};
 pub trait Event<EventData: ?Sized>: 'static {}
 
 pub trait EventEmitter {
-    fn trigger<E: Event<X>, X: ?Sized>(&self, event: &E) {
-        if let Some(listeners) = self.listeners::<E, X>() {
-            for listener in listeners {
-                let listener: &Box<dyn Fn(&E)> = unsafe { transmute(listener) };
-                (*listener)(event);
-            }
-        }
-    }
-
-    fn listeners<E: Event<X>, X: ?Sized>(&self) -> Option<&Vec<Box<dyn Fn(&())>>>;
+    fn trigger<E: Event<X>, X: ?Sized>(&mut self, event: &E);
 }
 
 pub struct EventDispatcher {
-    listeners: HashMap<TypeId, Vec<Box<dyn Fn(&())>>>,
+    listeners: HashMap<TypeId, Vec<Box<dyn FnMut(&())>>>,
 }
 
 impl EventDispatcher {
@@ -26,9 +17,9 @@ impl EventDispatcher {
         }
     }
 
-    pub fn add_listener<E: Event<X>, X: ?Sized, F: Fn(&E)>(&mut self, listener: F) {
-        let callback: Box<dyn Fn(&E)> = Box::new(listener);
-        let callback: Box<dyn Fn(&())> = unsafe { transmute(callback) };
+    pub fn add_listener<E: Event<X>, X: ?Sized, F: FnMut(&E)>(&mut self, listener: F) {
+        let callback: Box<dyn FnMut(&E)> = Box::new(listener);
+        let callback: Box<dyn FnMut(&())> = unsafe { transmute(callback) };
 
         self.listeners
             .entry(TypeId::of::<E>())
@@ -38,8 +29,14 @@ impl EventDispatcher {
 }
 
 impl EventEmitter for EventDispatcher {
-    fn listeners<E: Event<X>, X: ?Sized>(&self) -> Option<&Vec<Box<dyn Fn(&())>>> {
-        return self.listeners.get(&TypeId::of::<E>());
+    fn trigger<E: Event<X>, X: ?Sized>(&mut self, event: &E) {
+        if let Some(listeners) = self.listeners.remove(&TypeId::of::<E>()) {
+            for listener in listeners {
+                let mut listener: Box<dyn FnMut(&E)> = unsafe { transmute(listener) };
+                listener(event);
+                self.add_listener(listener);
+            }
+        }
     }
 }
 
@@ -56,17 +53,15 @@ mod test {
     #[test]
     fn event_dispatcher_notifies_appropriate_event_listeners() {
         let mut event_dispatcher = EventDispatcher::new();
-        static mut TEST_EVENT_COUNT: u8 = 0;
+        let mut test_event_count = 0;
 
-        event_dispatcher.add_listener(|_event: &TestEvent| unsafe {
-            TEST_EVENT_COUNT += 1;
+        event_dispatcher.add_listener(|_event: &TestEvent| {
+            test_event_count += 1;
         });
 
         event_dispatcher.trigger(&TestEvent {});
         event_dispatcher.trigger(&EventWithNoListeners {});
 
-        unsafe {
-            assert_eq!(1, TEST_EVENT_COUNT);
-        }
+        assert_eq!(1, test_event_count);
     }
 }
