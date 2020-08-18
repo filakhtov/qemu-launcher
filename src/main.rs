@@ -1,5 +1,5 @@
 use std::{
-    env,
+    env, fs,
     os::unix::process::CommandExt,
     path::Path,
     process::{Child, Command, Stdio},
@@ -30,7 +30,23 @@ fn usage(name: &str) {
 }
 
 fn handle_vcpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &config::Config) {
-    let vcpu_info = match qmp::read_vcpu_info(child) {
+    let stdin = match child.stdin.as_mut() {
+        Some(stdin) => stdin,
+        None => {
+            eprintln!("Unable to obtain qemu process stdin descriptor.");
+            return;
+        }
+    };
+    let stdout = match child.stdout.as_mut() {
+        Some(stdout) => stdout,
+        None => {
+            eprintln!("Unable to obtain qemu process stdout descriptor.");
+            return;
+        }
+    };
+    let qmp_socket = qmp::StdioReadWrite::new(stdin, stdout);
+
+    let vcpu_info = match qmp::read_vcpu_info_from_qmp_socket(qmp_socket) {
         Ok(vcpu_info) => vcpu_info,
         Err(e) => {
             eprintln!("Failed to obtain vCPU mapping info from QEMU: {}", e);
@@ -52,12 +68,7 @@ fn handle_vcpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &
 
         match cpuset.pin_task(pin.3, task_id) {
             cpuset::PinResult::Ok => {
-                if config.is_debug_enabled() {
-                    println!(
-                        "Successfully pinned the vCPU core `{}.{}.{}` with the task ID `{}` to the host CPU `{}`.",
-                        pin.0, pin.1, pin.2, task_id, pin.3
-                    )
-                }
+                // debug removed (for now)
             }
             cpuset::PinResult::Warn(e) => eprintln!(
                 "Warning pinning vCPU `{}.{}.{}` with the task ID `{}` to the host CPU `{}`: {}",
@@ -71,7 +82,7 @@ fn handle_vcpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &
     }
 
     if config.has_scheduling() {
-        let scheduler = config.get_scheduler().unwrap();
+        let scheduler = config.get_scheduler().clone().unwrap();
         let priority = config.get_priority().unwrap().to_string();
 
         for task_id in vcpu_info.get_task_ids() {
@@ -84,15 +95,7 @@ fn handle_vcpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &
             {
                 Ok(mut c) => match c.wait() {
                     Ok(r) => {
-                        if config.is_debug_enabled() && r.success() {
-                            println!(
-                                "vCPU thread `{}` priority successfully changed, scheduler: {}, priority: {}",
-                                task_id,
-                                scheduler,
-                                priority
-                            );
-                        }
-
+                        // debug removed (for now)
                         if !r.success() {
                             eprintln!(
                                 "Failed to change vCPU thread `{}` priority: `chrt` call failed",
@@ -130,7 +133,18 @@ fn main() {
 
     let machine_name = &args[1];
 
-    let config = match config::Config::new(&format!("{}/{}.yml", config_dir, machine_name)) {
+    let config_file_path = format!("{}/{}.yml", config_dir, machine_name);
+    let config_file = match fs::read_to_string(&config_file_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "Failed to read configuration file `{}`: {}",
+                config_file_path, e
+            );
+            return;
+        }
+    };
+    let config = match config::Config::new(&config_file) {
         Ok(c) => c,
         Err(e) => {
             eprintln!(
@@ -180,11 +194,11 @@ fn main() {
     }
 
     if let Some(uid) = config.get_user() {
-        command.uid(uid);
+        command.uid(uid as u32);
     }
 
     if let Some(gid) = config.get_group() {
-        command.gid(gid);
+        command.gid(gid as u32);
     }
 
     if config.has_env_vars() {
