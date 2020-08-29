@@ -1,5 +1,3 @@
-extern crate nix;
-extern crate proc_mounts;
 
 use nix::fcntl::{flock, FlockArg};
 use proc_mounts::MountIter;

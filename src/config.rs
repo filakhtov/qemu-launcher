@@ -1,5 +1,3 @@
-extern crate yaml_rust;
-
 use std::{
     collections::HashMap,
     convert::TryFrom,
