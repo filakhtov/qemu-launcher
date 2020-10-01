@@ -8,6 +8,8 @@ use std::{
 mod config;
 mod cpuset;
 mod qmp;
+#[cfg(test)]
+mod test;
 
 fn usage(name: &str) {
     let programname = match Path::new(name).file_name() {
@@ -66,18 +68,11 @@ fn handle_vcpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &
             }
         };
 
-        match cpuset.pin_task(pin.3, task_id) {
-            cpuset::PinResult::Ok => {
-                // debug removed (for now)
-            }
-            cpuset::PinResult::Warn(e) => eprintln!(
-                "Warning pinning vCPU `{}.{}.{}` with the task ID `{}` to the host CPU `{}`: {}",
-                pin.0, pin.1, pin.2, pin.3, task_id, e
-            ),
-            cpuset::PinResult::Err(e) => eprintln!(
+        if let Err(e) = cpuset.pin_task(pin.3, task_id) {
+            eprintln!(
                 "Failed to pin the vCPU `{}.{}.{}` core task ID `{}` to the host CPU `{}`: {}",
                 pin.0, pin.1, pin.2, pin.3, task_id, e
-            ),
+            );
         }
     }
 
@@ -181,7 +176,13 @@ fn main() {
         None => "qemu".to_string(),
     };
 
-    let mut cpuset = cpuset::CpuSet::new(&cpuset_mountpoint, &cpuset_prefix);
+    let mut cpuset = match cpuset::CpuSet::new(&cpuset_mountpoint, &cpuset_prefix) {
+        Ok(cpuset) => cpuset,
+        Err(e) => {
+            eprintln!("{}", e);
+            return;
+        }
+    };
 
     let mut command = Command::new(config.get_qemu_binary_path());
     command
