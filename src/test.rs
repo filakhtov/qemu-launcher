@@ -10,3 +10,15 @@ macro_rules! assert_error {
         }
     }};
 }
+
+#[macro_export]
+macro_rules! vec_deq {
+    [] => {{
+        VecDeque::new()
+    }};
+    [ $( $item:expr ),+ $(,)? ] => {{
+        let mut v = VecDeque::new();
+        $( v.push_back($item); )*
+        v
+    }};
+}

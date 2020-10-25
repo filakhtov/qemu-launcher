@@ -386,7 +386,7 @@ fn get_cpus_from_task_status<S: AsRef<str>>(status: S) -> Result<String, Error> 
 #[cfg(test)]
 mod test {
     use super::CpuSet;
-    use crate::assert_error;
+    use crate::{assert_error, vec_deq};
     use ::nix::{fcntl::FlockArg, mount::MsFlags};
     use ::std::{
         cell::RefCell,
@@ -394,17 +394,6 @@ mod test {
         io::{Error, ErrorKind, SeekFrom},
         os::unix::io::RawFd,
     };
-
-    macro_rules! vec_deq {
-        [] => {{
-            VecDeque::new()
-        }};
-        [ $( $item:expr ),+ $(,)? ] => {{
-            let mut v = VecDeque::new();
-            $( v.push_back($item); )*
-            v
-        }};
-    }
 
     macro_rules! error {
         ($msg:expr) => {{
