@@ -786,27 +786,6 @@ mod test {
                     result
                 }
 
-                pub fn lock(&mut self) -> Result<()> {
-                    match self.lock.pop_front() {
-                        Some(r) => r,
-                        None => panic!("Unexpected call to std::fs::File::lock()"),
-                    }
-                }
-
-                pub fn trim(&mut self) -> Result<()> {
-                    match self.trim.pop_front() {
-                        Some(r) => r,
-                        None => panic!("Unexpected call to std::fs::File::trim()"),
-                    }
-                }
-
-                pub fn read_string(&mut self) -> Result<String> {
-                    match self.read_string.pop_front() {
-                        Some(r) => r,
-                        None => panic!("Unexpected call to std::fs::File::read_string()"),
-                    }
-                }
-
                 pub fn write(&mut self, buf: &[u8]) -> Result<usize> {
                     let buf = from_utf8(buf.as_ref()).unwrap();
 
