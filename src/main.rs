@@ -7,6 +7,7 @@ use std::{
 
 mod config;
 mod cpuset;
+mod process;
 mod qmp;
 #[cfg(test)]
 mod test;
@@ -81,27 +82,16 @@ fn handle_vcpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &
         let priority = config.get_priority().unwrap().to_string();
 
         for task_id in vcpu_info.get_task_ids() {
-            match Command::new("chrt")
-                .arg(format!("--{}", scheduler))
-                .arg("--pid")
-                .arg(&priority)
-                .arg(task_id.to_string())
-                .spawn()
-            {
-                Ok(mut c) => match c.wait() {
-                    Ok(r) => {
-                        // debug removed (for now)
-                        if !r.success() {
-                            eprintln!(
-                                "Failed to change vCPU thread `{}` priority: `chrt` call failed",
-                                task_id
-                            )
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to change vCPU thread `{}` priority: {}", task_id, e)
-                    }
-                },
+            match process::Process::oneshot(
+                "chrt",
+                &[
+                    format!("--{}", scheduler).as_str(),
+                    "--pid",
+                    &priority,
+                    task_id.to_string().as_str(),
+                ],
+            ) {
+                Ok(_) => {} // TODO: debug
                 Err(e) => eprintln!("Failed to change vCPU thread `{}` priority: {}", task_id, e),
             }
         }
