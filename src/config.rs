@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     convert::TryFrom,
-    io::{Error, ErrorKind},
+    io::{Error, ErrorKind, Result},
 };
 use yaml_rust::{
     yaml::{Array, Hash},
@@ -14,19 +14,20 @@ enum Argument {
 }
 
 pub struct Config {
-    user: Option<u16>,
-    group: Option<u16>,
-    cpu_pinning: Vec<(usize, usize, usize, usize)>,
-    qemu_binary: String,
     clear_env: bool,
-    env: HashMap<String, String>,
-    priority: Option<u8>,
-    scheduler: Option<String>,
     command_line: Vec<Argument>,
+    cpu_pinning: Vec<(usize, usize, usize, usize)>,
+    env: HashMap<String, String>,
+    group: Option<u16>,
+    priority: Option<u8>,
+    qemu_binary: String,
+    rlimit_memlock: bool,
+    scheduler: Option<String>,
+    user: Option<u16>,
 }
 
 impl Config {
-    pub fn new(yaml: &str) -> Result<Self, Error> {
+    pub fn new(yaml: &str) -> Result<Self> {
         let conf = match YamlLoader::load_from_str(yaml) {
             Ok(mut data) => match data.pop() {
                 Some(conf) => conf,
@@ -41,15 +42,16 @@ impl Config {
         };
 
         Ok(Config {
-            user: parse_user(&conf)?,
-            group: parse_group(&conf)?,
-            cpu_pinning: parse_cpu_pinning(&conf)?,
-            qemu_binary: parse_qemu_binary(&conf)?,
             clear_env: parse_clear_env(&conf)?,
-            env: parse_env(&conf)?,
-            priority: parse_priority(&conf)?,
-            scheduler: parse_scheduler(&conf)?,
             command_line: parse_command_line(&conf)?,
+            cpu_pinning: parse_cpu_pinning(&conf)?,
+            env: parse_env(&conf)?,
+            group: parse_group(&conf)?,
+            priority: parse_priority(&conf)?,
+            qemu_binary: parse_qemu_binary(&conf)?,
+            rlimit_memlock: parse_rlimit_memlock(&conf)?,
+            scheduler: parse_scheduler(&conf)?,
+            user: parse_user(&conf)?,
         })
     }
 
@@ -120,9 +122,13 @@ impl Config {
     pub fn get_scheduler(&self) -> &Option<String> {
         &self.scheduler
     }
+
+    pub fn rlimit_memlock(&self) -> bool {
+        self.rlimit_memlock
+    }
 }
 
-fn parse_bool_value(yaml: &Yaml, key: &str) -> Result<bool, Error> {
+fn parse_bool_value(yaml: &Yaml, key: &str) -> Result<bool> {
     match yaml[key] {
         Yaml::Boolean(b) => Ok(b),
         Yaml::BadValue => Ok(false),
@@ -136,11 +142,11 @@ fn parse_bool_value(yaml: &Yaml, key: &str) -> Result<bool, Error> {
     }
 }
 
-fn parse_clear_env(config: &Yaml) -> Result<bool, Error> {
+fn parse_clear_env(config: &Yaml) -> Result<bool> {
     parse_bool_value(&config["launcher"], "clear_env")
 }
 
-fn parse_qemu_binary(config: &Yaml) -> Result<String, Error> {
+fn parse_qemu_binary(config: &Yaml) -> Result<String> {
     match config["launcher"]["binary"].as_str() {
         Some(bin) => Ok(bin.to_string()),
         None => Err(Error::new(
@@ -151,7 +157,7 @@ fn parse_qemu_binary(config: &Yaml) -> Result<String, Error> {
     }
 }
 
-fn parse_env(config: &Yaml) -> Result<HashMap<String, String>, Error> {
+fn parse_env(config: &Yaml) -> Result<HashMap<String, String>> {
     match &config["launcher"]["env"] {
         Yaml::Hash(h) => parse_env_hash(h),
         Yaml::BadValue => Ok(HashMap::new()),
@@ -162,7 +168,7 @@ fn parse_env(config: &Yaml) -> Result<HashMap<String, String>, Error> {
     }
 }
 
-fn parse_env_hash(env: &Hash) -> Result<HashMap<String, String>, Error> {
+fn parse_env_hash(env: &Hash) -> Result<HashMap<String, String>> {
     let mut env_vars = HashMap::new();
 
     for (name, value) in env {
@@ -195,7 +201,7 @@ fn parse_env_hash(env: &Hash) -> Result<HashMap<String, String>, Error> {
     Ok(env_vars)
 }
 
-fn parse_u16_value(config: &Yaml, key: &str) -> Result<Option<u16>, Error> {
+fn parse_u16_value(config: &Yaml, key: &str) -> Result<Option<u16>> {
     match config[key] {
         Yaml::Integer(i) => match u16::try_from(i) {
             Ok(i) => Ok(Some(i)),
@@ -219,15 +225,15 @@ fn parse_u16_value(config: &Yaml, key: &str) -> Result<Option<u16>, Error> {
     }
 }
 
-fn parse_user(config: &Yaml) -> Result<Option<u16>, Error> {
+fn parse_user(config: &Yaml) -> Result<Option<u16>> {
     parse_u16_value(&config["launcher"], "user")
 }
 
-fn parse_group(config: &Yaml) -> Result<Option<u16>, Error> {
+fn parse_group(config: &Yaml) -> Result<Option<u16>> {
     parse_u16_value(&config["launcher"], "group")
 }
 
-fn parse_priority(config: &Yaml) -> Result<Option<u8>, Error> {
+fn parse_priority(config: &Yaml) -> Result<Option<u8>> {
     match config["launcher"]["priority"] {
         Yaml::Integer(i) => match u8::try_from(i) {
             Ok(i) => Ok(Some(i)),
@@ -244,7 +250,7 @@ fn parse_priority(config: &Yaml) -> Result<Option<u8>, Error> {
     }
 }
 
-fn parse_scheduler(config: &Yaml) -> Result<Option<String>, Error> {
+fn parse_scheduler(config: &Yaml) -> Result<Option<String>> {
     match &config["launcher"]["scheduler"] {
         Yaml::String(s) => match s.as_str() {
             "batch" | "deadline" | "fifo" | "idle" | "other" | "rr" => Ok(Some(s.to_string())),
@@ -264,6 +270,17 @@ fn parse_scheduler(config: &Yaml) -> Result<Option<String>, Error> {
     }
 }
 
+fn parse_rlimit_memlock(config: &Yaml) -> Result<bool> {
+    match &config["launcher"]["rlimit_memlock"] {
+        Yaml::Boolean(b) => Ok(*b),
+        Yaml::BadValue => Ok(false),
+        _ => Err(Error::new(
+            ErrorKind::InvalidData,
+            format!("Failed to parse `launcher.rlimit_memlock`: boolean expected."),
+        )),
+    }
+}
+
 fn as_u64(id: &Yaml) -> Option<usize> {
     match id.as_i64() {
         Some(i) => match usize::try_from(i) {
@@ -274,7 +291,7 @@ fn as_u64(id: &Yaml) -> Option<usize> {
     }
 }
 
-fn parse_cpu_pinning_sockets(sockets: &Hash) -> Result<Vec<(usize, usize, usize, usize)>, Error> {
+fn parse_cpu_pinning_sockets(sockets: &Hash) -> Result<Vec<(usize, usize, usize, usize)>> {
     let mut cpu_pinning = vec![];
 
     for (socket, cores) in sockets {
@@ -311,7 +328,7 @@ fn parse_cpu_pinning_sockets(sockets: &Hash) -> Result<Vec<(usize, usize, usize,
 fn parse_cpu_pinning_cores(
     socket_id: usize,
     cores: &Hash,
-) -> Result<Vec<(usize, usize, usize, usize)>, Error> {
+) -> Result<Vec<(usize, usize, usize, usize)>> {
     let mut cpu_pinning = vec![];
 
     for (core, threads) in cores {
@@ -350,7 +367,7 @@ fn parse_cpu_pinning_threads(
     socket_id: usize,
     core_id: usize,
     threads: &Hash,
-) -> Result<Vec<(usize, usize, usize, usize)>, Error> {
+) -> Result<Vec<(usize, usize, usize, usize)>> {
     let mut cpu_pinning = vec![];
 
     for (thread, host) in threads {
@@ -384,7 +401,7 @@ fn parse_cpu_pinning_threads(
     Ok(cpu_pinning)
 }
 
-fn parse_cpu_pinning(config: &Yaml) -> Result<Vec<(usize, usize, usize, usize)>, Error> {
+fn parse_cpu_pinning(config: &Yaml) -> Result<Vec<(usize, usize, usize, usize)>> {
     match &config["launcher"]["vcpu_pinning"] {
         Yaml::Hash(sockets) => parse_cpu_pinning_sockets(sockets),
         Yaml::BadValue => Ok(vec![]),
@@ -400,7 +417,7 @@ fn parse_cpu_pinning(config: &Yaml) -> Result<Vec<(usize, usize, usize, usize)>,
     }
 }
 
-fn parse_command_line(config: &Yaml) -> Result<Vec<Argument>, Error> {
+fn parse_command_line(config: &Yaml) -> Result<Vec<Argument>> {
     match &config["qemu"] {
         Yaml::Array(options) => parse_command_line_options(options),
         _ => Err(Error::new(
@@ -413,7 +430,7 @@ fn parse_command_line(config: &Yaml) -> Result<Vec<Argument>, Error> {
     }
 }
 
-fn parse_command_line_options(options: &Array) -> Result<Vec<Argument>, Error> {
+fn parse_command_line_options(options: &Array) -> Result<Vec<Argument>> {
     let mut parsed_options = vec![];
 
     for (position, option) in options.iter().enumerate() {
@@ -443,7 +460,7 @@ fn parse_command_line_options(options: &Array) -> Result<Vec<Argument>, Error> {
     Ok(parsed_options)
 }
 
-fn parse_parameter(option: &Hash, position: usize) -> Result<Argument, Error> {
+fn parse_parameter(option: &Hash, position: usize) -> Result<Argument> {
     if option.len() != 1 {
         return Err(Error::new(
             ErrorKind::InvalidData,
@@ -489,7 +506,7 @@ fn parse_parameter(option: &Hash, position: usize) -> Result<Argument, Error> {
     Ok(Argument::Parameter(name, value))
 }
 
-fn parse_parameter_value(name: &str, values: &Array) -> Result<String, Error> {
+fn parse_parameter_value(name: &str, values: &Array) -> Result<String> {
     if values.len() == 0 {
         return Err(Error::new(
             ErrorKind::InvalidData,
@@ -525,7 +542,7 @@ fn parse_parameter_value(name: &str, values: &Array) -> Result<String, Error> {
     Ok(parts.join(","))
 }
 
-fn parse_parameter_value_part(name: &str, part: &Hash) -> Result<String, Error> {
+fn parse_parameter_value_part(name: &str, part: &Hash) -> Result<String> {
     if part.len() != 1 {
         return Err(Error::new(
             ErrorKind::InvalidData,

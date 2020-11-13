@@ -101,6 +101,10 @@ vcpu_pinning:
 
 the thread 0 of the core 0 on the socket 0 will be pinned to the logical host processor 2, thread 1 core 0 socket 0
 to 6, thread 0 core 1 socket 0 to 3 and thread 1 core 1 socket 0 to 7.
+- `rlimit_memlock` - boolean, optional, defaults to `false`. When set to `true` the `qemu-launcher` will change an
+amount of memory that can be locked by the `qemu` process to `unlimited`, using the `setrlimit(2)` system call.
+Both, soft and hard limits are unset. This is necessary for systems that have a low limit set by default for the
+amount of memory that a single process can lock.
 
 #### An important note on vCPU pinning
 In order to achieve the best possible virtual machine performance, it is necessary to match the number of threads

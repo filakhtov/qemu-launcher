@@ -1,3 +1,4 @@
+use rlimit::{setrlimit, Resource, Rlim};
 use std::{
     env, fs,
     os::unix::process::CommandExt,
@@ -173,6 +174,13 @@ fn main() {
             return;
         }
     };
+
+    if config.rlimit_memlock() {
+        if let Err(e) = setrlimit(Resource::MEMLOCK, Rlim::INFINITY, Rlim::INFINITY) {
+            eprintln!("{}", e);
+            return;
+        }
+    }
 
     let mut command = Command::new(config.get_qemu_binary_path());
     command
