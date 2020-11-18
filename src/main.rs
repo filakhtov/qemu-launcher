@@ -1,3 +1,14 @@
+mod arguments;
+mod config;
+mod cpuset;
+mod environment;
+mod process;
+mod qmp;
+#[cfg(test)]
+mod test;
+
+use arguments::Arguments;
+use environment::Environment;
 use rlimit::{setrlimit, Resource, Rlim};
 use std::{
     env, fs,
@@ -5,13 +16,6 @@ use std::{
     path::Path,
     process::{Child, Command, Stdio},
 };
-
-mod config;
-mod cpuset;
-mod process;
-mod qmp;
-#[cfg(test)]
-mod test;
 
 fn usage(name: &str) {
     let programname = match Path::new(name).file_name() {
@@ -22,7 +26,10 @@ fn usage(name: &str) {
         None => "qemu-launcher".to_string(),
     };
 
-    eprintln!("Usage: {} <vm-name>", programname);
+    eprintln!("Usage: {} [-v] [-d] [-h] <vm-name>", programname);
+    eprintln!("-h display this help message");
+    eprintln!("-v enable verbose mode. In this mode additional information about program execution flow will be printed.");
+    eprintln!("-d enable debugging mode. In this mode a lot of information about pretty much every step taken by the application will be printed.");
     eprintln!("");
     eprintln!("Supported environment variables:");
     eprintln!("- QEMU_LAUNCHER_CONFIG_DIR - a path to the directory where virtual machine configuration files are stored.");
@@ -100,26 +107,33 @@ fn handle_vcpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &
 }
 
 fn main() {
-    let config_dir = match env::var_os("QEMU_LAUNCHER_CONFIG_DIR") {
-        Some(value) => match value.into_string() {
-            Ok(value) => value,
-            Err(_) => {
-                eprintln!("Failed to parse the `QEMU_LAUNCHER_CONFIG_DIR` environment variable.");
-                return;
-            }
-        },
-        None => "/usr/local/etc/qemu-launcher".to_string(),
+    let env = match Environment::new(env::vars()) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("Unable to parse environment variables: {}", e);
+            return;
+        }
     };
 
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        usage(&args[0]);
-        return;
-    }
+    let args = match Arguments::new(&env::args().collect()) {
+        Arguments::Empty => panic!("Could not parse arguments. Aborting."),
+        Arguments::Usage(u) => {
+            usage(&u.get_program_name());
+            return;
+        }
+        Arguments::Invalid(i) => {
+            eprintln!("Error parsing arguments: {}", i.get_error());
+            usage(&i.get_program_name());
+            return;
+        }
+        Arguments::Valid(v) => v,
+    };
 
-    let machine_name = &args[1];
-
-    let config_file_path = format!("{}/{}.yml", config_dir, machine_name);
+    let config_file_path = format!(
+        "{}/{}.yml",
+        env.get_config_directory(),
+        &args.get_machine_name()
+    );
     let config_file = match fs::read_to_string(&config_file_path) {
         Ok(s) => s,
         Err(e) => {
@@ -135,39 +149,15 @@ fn main() {
         Err(e) => {
             eprintln!(
                 "Configuration load error for `{}` machine: {}",
-                machine_name, e
+                args.get_machine_name(),
+                e
             );
             return;
         }
     };
 
-    let cpuset_mountpoint = match env::var_os("QEMU_LAUNCHER_CPUSET_MOUNT_PATH") {
-        Some(value) => {
-            match value.into_string() {
-                Ok(value) => value,
-                Err(_) => {
-                    eprintln!("Failed to parse the `QEMU_LAUNCHER_CPUSET_MOUNT_PATH` environment variable.");
-                    return;
-                }
-            }
-        }
-        None => "/sys/fs/cgroup/cpuset".to_string(),
-    };
-
-    let cpuset_prefix = match env::var_os("QEMU_LAUNCHER_CPUSET_PREFIX") {
-        Some(value) => match value.into_string() {
-            Ok(value) => value,
-            Err(_) => {
-                eprintln!(
-                    "Failed to parse the `QEMU_LAUNCHER_CPUSET_PREFIX` environment variable."
-                );
-                return;
-            }
-        },
-        None => "qemu".to_string(),
-    };
-
-    let mut cpuset = match cpuset::CpuSet::new(&cpuset_mountpoint, &cpuset_prefix) {
+    let mut cpuset = match cpuset::CpuSet::new(env.get_cpuset_mount_path(), env.get_cpuset_prefix())
+    {
         Ok(cpuset) => cpuset,
         Err(e) => {
             eprintln!("{}", e);

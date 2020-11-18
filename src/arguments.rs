@@ -1,29 +1,46 @@
-use std::{
-    io::{Error, ErrorKind},
-    path::Path,
-};
+use std::path::Path;
 
 const PROGRAM_NAME: &str = "qemu-launcher";
 
-pub struct Arguments {
+pub struct UsageArgs {
+    program_name: String,
+}
+
+impl UsageArgs {
+    pub fn get_program_name(&self) -> &String {
+        &self.program_name
+    }
+}
+
+pub struct ErrorArgs {
+    program_name: String,
+    error: &'static str,
+}
+
+impl ErrorArgs {
+    pub fn get_program_name(&self) -> &String {
+        &self.program_name
+    }
+
+    pub fn get_error(&self) -> &'static str {
+        self.error
+    }
+}
+
+pub struct ValidArgs {
     program_name: String,
     debug: bool,
-    show_usage: bool,
     machine_name: String,
     verbose: bool,
 }
 
-impl Arguments {
+impl ValidArgs {
     pub fn is_debug_enabled(&self) -> bool {
         self.debug
     }
 
     pub fn is_verbose_mode(&self) -> bool {
         self.verbose || self.is_debug_enabled()
-    }
-
-    pub fn should_show_usage(&self) -> bool {
-        self.show_usage
     }
 
     pub fn get_machine_name(&self) -> &str {
@@ -33,10 +50,19 @@ impl Arguments {
     pub fn get_program_name(&self) -> &str {
         &self.program_name
     }
+}
 
-    pub fn new(arguments: &Vec<String>) -> Result<Self, Error> {
+pub enum Arguments {
+    Empty,
+    Invalid(ErrorArgs),
+    Valid(ValidArgs),
+    Usage(UsageArgs),
+}
+
+impl Arguments {
+    pub fn new(arguments: &Vec<String>) -> Arguments {
         if arguments.len() < 1 {
-            return Err(Error::new(ErrorKind::InvalidInput, "Empty arguments."));
+            return Arguments::Empty;
         }
 
         let program_name = match Path::new(&arguments[0]).file_name() {
@@ -51,7 +77,6 @@ impl Arguments {
         let mut verbose = false;
         let mut debug = false;
         let mut machine_name = String::new();
-        let mut usage = false;
         let mut has_machine_name = false;
 
         for argument in &arguments[1..] {
@@ -62,12 +87,13 @@ impl Arguments {
                 "-d" => {
                     debug = true;
                 }
-                "-h" => {
-                    usage = true;
-                }
+                "-h" => return Arguments::Usage(UsageArgs { program_name }),
                 _ => {
                     if has_machine_name {
-                        return Err(Error::new(ErrorKind::Other, "Too many parameters."));
+                        return Arguments::Invalid(ErrorArgs {
+                            program_name,
+                            error: "Too many parameters.",
+                        });
                     }
 
                     machine_name = argument.to_owned();
@@ -76,69 +102,48 @@ impl Arguments {
             }
         }
 
-        if usage {
-            return Ok(Self {
-                program_name: program_name,
-                verbose: false,
-                debug: false,
-                show_usage: true,
-                machine_name: String::new(),
+        if !has_machine_name {
+            return Arguments::Invalid(ErrorArgs {
+                program_name,
+                error: "Missing the guest machine name",
             });
         }
 
-        if !has_machine_name {
-            return Err(Error::new(
-                ErrorKind::Other,
-                "Missing virtual machine name.",
-            ));
+        if !is_valid_machine_name(&machine_name) {
+            return Arguments::Invalid(ErrorArgs {
+                program_name,
+                error: "The machine name contains invalid characters.",
+            });
         }
 
-        validate_machine_name(&machine_name)?;
-
-        Ok(Self {
-            program_name: program_name,
-            verbose: verbose,
-            debug: debug,
-            show_usage: usage,
-            machine_name: machine_name,
+        Arguments::Valid(ValidArgs {
+            program_name,
+            verbose,
+            debug,
+            machine_name,
         })
     }
 }
 
-fn validate_machine_name(machine_name: &str) -> Result<(), Error> {
+fn is_valid_machine_name(machine_name: &str) -> bool {
     if machine_name.contains("\0") || machine_name.contains("/") {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "Machine name contains invalid characters.",
-        ));
+        return false;
     }
 
-    Ok({})
+    true
 }
 
 #[cfg(test)]
 mod test {
     use super::Arguments;
-    use std::io::{Error, ErrorKind};
-
-    fn assert_result_is_error(
-        result: Result<Arguments, Error>,
-        expected_kind: ErrorKind,
-        expected_message: &str,
-    ) {
-        match result {
-            Ok(_) => panic!("Parser did not return an error"),
-            Err(e) => {
-                assert_eq!(expected_kind, e.kind());
-                assert_eq!(expected_message, format!("{}", e));
-            }
-        }
-    }
 
     #[test]
     fn arguments_accepts_machine_name() {
-        let arguments =
-            Arguments::new(&vec![String::from("launcher"), String::from("my-vm")]).unwrap();
+        let arguments = match Arguments::new(&vec![String::from("launcher"), String::from("my-vm")])
+        {
+            Arguments::Valid(v) => v,
+            _ => panic!("Expected arguments to be valid"),
+        };
 
         assert!(
             !arguments.is_verbose_mode(),
@@ -148,22 +153,20 @@ mod test {
             !arguments.is_debug_enabled(),
             "Debug mode is enabled without `-d` flag"
         );
-        assert!(
-            !arguments.should_show_usage(),
-            "Show usage is enabled without `-h` flag"
-        );
         assert_eq!("my-vm", arguments.get_machine_name());
         assert_eq!("launcher", arguments.get_program_name());
     }
 
     #[test]
     fn arguments_accepts_verbose_flag() {
-        let arguments = Arguments::new(&vec![
+        let arguments = match Arguments::new(&vec![
             String::from("launcher"),
             String::from("-v"),
             String::from("verbose-vm"),
-        ])
-        .unwrap();
+        ]) {
+            Arguments::Valid(v) => v,
+            _ => panic!("Expected arguments to be valid"),
+        };
 
         assert!(
             arguments.is_verbose_mode(),
@@ -173,34 +176,38 @@ mod test {
 
     #[test]
     fn arguments_accepts_debug_flag() {
-        let arguments = Arguments::new(&vec![
+        let arguments = match Arguments::new(&vec![
             String::from("launcher"),
             String::from("-d"),
             String::from("debug-vm"),
-        ])
-        .unwrap();
+        ]) {
+            Arguments::Valid(v) => v,
+            _ => panic!("Expected arguments to be valid"),
+        };
 
         assert!(
             arguments.is_verbose_mode(),
-            "Debug mode is not enabled with `-d` flag"
+            "Verbose mode is not enabled with `-d` flag"
         );
         assert!(
             arguments.is_debug_enabled(),
-            "Verbose mode is not enabled with `-d` flag"
+            "Debug mode is not enabled with `-d` flag"
         );
     }
 
     #[test]
     fn arguments_ignores_duplicate_flags() {
-        let arguments = Arguments::new(&vec![
+        let arguments = match Arguments::new(&vec![
             String::from("launcher"),
             String::from("-v"),
             String::from("debug-vm"),
             String::from("-v"),
             String::from("-d"),
             String::from("-d"),
-        ])
-        .unwrap();
+        ]) {
+            Arguments::Valid(v) => v,
+            _ => panic!("Expected arguments to be valid"),
+        };
 
         assert!(
             arguments.is_verbose_mode(),
@@ -214,71 +221,77 @@ mod test {
 
     #[test]
     fn arguments_reports_empty_arguments() {
-        let result = Arguments::new(&vec![]);
-
-        assert_result_is_error(result, ErrorKind::InvalidInput, "Empty arguments.");
+        match Arguments::new(&vec![]) {
+            Arguments::Empty => {}
+            _ => panic!("Expected arguments to be an empty instance"),
+        }
     }
 
     #[test]
     fn arguments_reports_missing_machine_name() {
-        let result = Arguments::new(&vec![String::from("qemu")]);
+        let result = match Arguments::new(&vec![String::from("qemu")]) {
+            Arguments::Invalid(e) => e,
+            _ => panic!("Expected arguments to be invalid"),
+        };
 
-        assert_result_is_error(result, ErrorKind::Other, "Missing virtual machine name.");
+        assert_eq!("Missing the guest machine name", result.get_error());
+        assert_eq!("qemu", result.get_program_name());
     }
 
     #[test]
     fn arguments_discards_all_arguments_if_help_is_requested() {
-        let arguments = Arguments::new(&vec![
+        let arguments = match Arguments::new(&vec![
             String::from("launcher"),
             String::from("-v"),
             String::from("-d"),
             String::from("-h"),
             String::from("debug-vm"),
-        ])
-        .unwrap();
+        ]) {
+            Arguments::Usage(u) => u,
+            _ => panic!("Expected arguments to be a usage instance"),
+        };
 
         assert_eq!("launcher", arguments.get_program_name());
-        assert!(
-            !arguments.is_verbose_mode(),
-            "Verbose mode is enabled with `-h` flag"
-        );
-        assert!(
-            !arguments.is_debug_enabled(),
-            "Debug mode is enabled with `-h` flag"
-        );
-        assert!(
-            arguments.should_show_usage(),
-            "Show usage is disabled with `-h` flag"
-        );
-        assert!(arguments.get_machine_name().is_empty());
     }
 
     #[test]
     fn arguments_reports_too_many_arguments() {
-        let result = Arguments::new(&vec![
+        let result = match Arguments::new(&vec![
             String::from("launcher"),
             String::from("my-vm"),
             String::from("your-vm"),
-        ]);
+        ]) {
+            Arguments::Invalid(e) => e,
+            _ => panic!("Expected arguments to be invalid"),
+        };
 
-        assert_result_is_error(result, ErrorKind::Other, "Too many parameters.");
+        assert_eq!("Too many parameters.", result.get_error());
+        assert_eq!("launcher", result.get_program_name());
     }
 
     #[test]
     fn arguments_reports_error_if_machine_name_contains_wrong_characters() {
-        let result = Arguments::new(&vec![String::from("launcher"), String::from("my-vm\0")]);
+        let result = match Arguments::new(&vec![String::from("launcher"), String::from("my-vm\0")])
+        {
+            Arguments::Invalid(e) => e,
+            _ => panic!("Expected arguments to be invalid"),
+        };
 
-        assert_result_is_error(
-            result,
-            ErrorKind::InvalidInput,
-            "Machine name contains invalid characters.",
+        assert_eq!(
+            "The machine name contains invalid characters.",
+            result.get_error(),
         );
+        assert_eq!("launcher", result.get_program_name());
     }
 
     #[test]
     fn arguments_uses_default_program_name_if_missing_from_input() {
-        let arguments = Arguments::new(&vec![String::from(""), String::from("myvm")]).unwrap();
+        let arguments = match Arguments::new(&vec![String::from(""), String::from("myvm")]) {
+            Arguments::Valid(v) => v,
+            _ => panic!("Expected arguments to be valid"),
+        };
 
         assert_eq!(super::PROGRAM_NAME, arguments.get_program_name());
+        assert_eq!("myvm", arguments.get_machine_name());
     }
 }

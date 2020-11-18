@@ -1,6 +1,6 @@
 use std::io::{Error, ErrorKind};
 
-struct Environment {
+pub struct Environment {
     config_directory: String,
     cpuset_mount_path: String,
     cpuset_prefix: String,
