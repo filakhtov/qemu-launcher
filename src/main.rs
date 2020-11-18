@@ -27,15 +27,21 @@ fn usage(name: &str) {
     };
 
     eprintln!("Usage: {} [-v] [-d] [-h] <vm-name>", programname);
-    eprintln!("-h display this help message");
-    eprintln!("-v enable verbose mode. In this mode additional information about program execution flow will be printed.");
-    eprintln!("-d enable debugging mode. In this mode a lot of information about pretty much every step taken by the application will be printed.");
+    eprintln!("");
+    eprintln!("-h  display this help message");
+    eprintln!("-v  enable verbose mode. In this mode additional information about program execution flow will be \
+        printed.");
+    eprintln!("-d  enable debugging mode. In this mode a lot of information about pretty much every step taken by \
+        the application will be printed.");
     eprintln!("");
     eprintln!("Supported environment variables:");
-    eprintln!("- QEMU_LAUNCHER_CONFIG_DIR - a path to the directory where virtual machine configuration files are stored.");
-    eprintln!("- QEMU_LAUNCHER_CPUSET_MOUNT_PATH - a path to the directory where a cpuset cgroup tree will be mounted.");
+    eprintln!("- QEMU_LAUNCHER_CONFIG_DIR - a path to the directory where virtual machine configuration files are \
+        stored.");
+    eprintln!("- QEMU_LAUNCHER_CPUSET_MOUNT_PATH - a path to the directory where a cpuset cgroup tree will be \
+        mounted.");
     eprintln!("                                    default: /sys/fs/cgroup/cpuset");
-    eprintln!("- QEMU_LAUNCHER_CPUSET_PREFIX - a prefix (directory) under the mount path where qemu cpusets will be created");
+    eprintln!("- QEMU_LAUNCHER_CPUSET_PREFIX - a prefix (directory) under the mount path where qemu cpusets will \
+        be created");
     eprintln!("                                default: qemu");
     eprintln!("");
 }
@@ -123,6 +129,7 @@ fn main() {
         }
         Arguments::Invalid(i) => {
             eprintln!("Error parsing arguments: {}", i.get_error());
+            eprintln!("");
             usage(&i.get_program_name());
             return;
         }
