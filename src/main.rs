@@ -13,20 +13,11 @@ use rlimit::{setrlimit, Resource, Rlim};
 use std::{
     env, fs,
     os::unix::process::CommandExt,
-    path::Path,
     process::{Child, Command, Stdio},
 };
 
 fn usage(name: &str) {
-    let programname = match Path::new(name).file_name() {
-        Some(n) => match n.to_os_string().into_string() {
-            Ok(string) => string,
-            Err(_) => "qemu-launcher".to_string(),
-        },
-        None => "qemu-launcher".to_string(),
-    };
-
-    eprintln!("Usage: {} [-v] [-d] [-h] <vm-name>", programname);
+    eprintln!("Usage: {} [-v] [-d] [-h] <vm-name>", name);
     eprintln!("");
     eprintln!("-h  display this help message");
     eprintln!("-v  enable verbose mode. In this mode additional information about program execution flow will be \
