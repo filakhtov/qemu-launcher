@@ -99,10 +99,6 @@ impl Config {
         &self.env
     }
 
-    pub fn has_env_vars(&self) -> bool {
-        self.env.len() > 0
-    }
-
     pub fn has_scheduling(&self) -> bool {
         if let None = self.scheduler {
             return false;

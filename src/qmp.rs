@@ -6,38 +6,6 @@ use std::{
 
 pub trait QmpPipe: Read + Write {}
 
-pub struct StdioReadWrite<'a> {
-    stdin: &'a mut dyn Write,
-    stdout: &'a mut dyn Read,
-}
-
-impl<'a> StdioReadWrite<'a> {
-    pub fn new(stdin: &'a mut impl Write, stdout: &'a mut impl Read) -> Self {
-        Self {
-            stdin: stdin,
-            stdout: stdout,
-        }
-    }
-}
-
-impl Read for StdioReadWrite<'_> {
-    fn read(&mut self, message: &mut [u8]) -> Result<usize, Error> {
-        self.stdout.read(message)
-    }
-}
-
-impl Write for StdioReadWrite<'_> {
-    fn write(&mut self, message: &[u8]) -> Result<usize, Error> {
-        self.stdin.write(message)
-    }
-
-    fn flush(&mut self) -> Result<(), Error> {
-        self.stdin.flush()
-    }
-}
-
-impl QmpPipe for StdioReadWrite<'_> {}
-
 struct QmpClient<'a> {
     io: Box<dyn QmpPipe + 'a>,
     negotiated: bool,

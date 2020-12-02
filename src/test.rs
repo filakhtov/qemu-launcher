@@ -103,9 +103,9 @@ macro_rules! verify_expectation {
 #[macro_export]
 #[cfg(test)]
 macro_rules! expect {
-    ($var:ident::$field:ident: $( { _ => _ } ),+ $(,)?) => {{
+    ($var:ident::$field:ident: { _ => _ } $(,)?) => {{
         $var.with(|expectations| {
-            $( expectations.borrow_mut().$field.push_back(((), ())); )*
+            expectations.borrow_mut().$field.push_back(((), ()));
         });
     }};
     ($var:ident::$field:ident: $( { $arg:expr => _ } ),+ $(,)?) => {{

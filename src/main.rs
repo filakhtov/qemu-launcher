@@ -9,12 +9,9 @@ mod test;
 
 use arguments::Arguments;
 use environment::Environment;
+use process::{ChildProcess, Process};
 use rlimit::{setrlimit, Resource, Rlim};
-use std::{
-    env, fs,
-    os::unix::process::CommandExt,
-    process::{Child, Command, Stdio},
-};
+use std::{env, fs};
 
 fn usage(name: &str) {
     eprintln!("Usage: {} [-v] [-d] [-h] <vm-name>", name);
@@ -37,22 +34,18 @@ fn usage(name: &str) {
     eprintln!("");
 }
 
-fn handle_vcpu_pinning(child: &mut Child, cpuset: &mut cpuset::CpuSet, config: &config::Config) {
-    let stdin = match child.stdin.as_mut() {
-        Some(stdin) => stdin,
-        None => {
-            eprintln!("Unable to obtain qemu process stdin descriptor.");
+fn handle_vcpu_pinning(
+    child: &mut ChildProcess,
+    cpuset: &mut cpuset::CpuSet,
+    config: &config::Config,
+) {
+    let qmp_socket = match child.get_stdio() {
+        Ok(io) => io,
+        Err(e) => {
+            eprintln!("Unable to obtain qemu process stdio descriptors: {}", e);
             return;
         }
     };
-    let stdout = match child.stdout.as_mut() {
-        Some(stdout) => stdout,
-        None => {
-            eprintln!("Unable to obtain qemu process stdout descriptor.");
-            return;
-        }
-    };
-    let qmp_socket = qmp::StdioReadWrite::new(stdin, stdout);
 
     let vcpu_info = match qmp::read_vcpu_info_from_qmp_socket(qmp_socket) {
         Ok(vcpu_info) => vcpu_info,
@@ -170,33 +163,18 @@ fn main() {
         }
     }
 
-    let mut command = Command::new(config.get_qemu_binary_path());
-    command
-        .args(config.get_command_line_options())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped());
-
-    if config.should_clear_env() {
-        command.env_clear();
-    }
-
-    if let Some(uid) = config.get_user() {
-        command.uid(uid as u32);
-    }
-
-    if let Some(gid) = config.get_group() {
-        command.gid(gid as u32);
-    }
-
-    if config.has_env_vars() {
-        command.envs(config.get_env_vars());
-    }
-
-    let mut child = match command.spawn() {
+    let mut child = match Process::new(config.get_qemu_binary_path())
+        .set_args(config.get_command_line_options())
+        .set_effective_group_id(&config.get_group())
+        .set_effective_user_id(&config.get_user())
+        .should_clear_env(config.should_clear_env())
+        .set_environment_variables(config.get_env_vars())
+        .spawn()
+    {
         Ok(c) => c,
         Err(e) => {
             eprintln!(
-                "Failed to run the `{}` child process: {}",
+                "Failed to execute the `{}` child process: {}",
                 config.get_qemu_binary_path(),
                 e
             );
@@ -208,22 +186,12 @@ fn main() {
         handle_vcpu_pinning(&mut child, &mut cpuset, &config);
     }
 
-    match child.wait() {
-        Ok(e) => {
-            if !e.success() {
-                eprintln!(
-                    "The child process `{}` was terminated with non-zero status.",
-                    config.get_qemu_binary_path()
-                );
-            }
-        }
-        Err(e) => {
-            eprintln!(
-                "The child process `{}` was terminated preliminarly: {}",
-                config.get_qemu_binary_path(),
-                e
-            );
-        }
+    if let Err(e) = child.wait() {
+        eprintln!(
+            "The child process `{}` was terminated preliminarly: {}",
+            config.get_qemu_binary_path(),
+            e
+        );
     }
 
     if let Err(e) = cpuset.release_threads() {
