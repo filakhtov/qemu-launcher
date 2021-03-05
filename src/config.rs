@@ -1,8 +1,13 @@
+#[cfg(not(test))]
+use std::fs::read_to_string;
 use std::{
     collections::HashMap,
     convert::TryFrom,
     io::{Error, ErrorKind, Result},
+    path::Path,
 };
+#[cfg(test)]
+use test::std::fs::read_to_string;
 use yaml_rust::{
     yaml::{Array, Hash},
     Yaml, YamlLoader,
@@ -27,8 +32,12 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(yaml: &str) -> Result<Self> {
-        let conf = match YamlLoader::load_from_str(yaml) {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::new(read_to_string(path)?)
+    }
+
+    pub fn new<Y: AsRef<str>>(yaml: Y) -> Result<Self> {
+        let conf = match YamlLoader::load_from_str(yaml.as_ref()) {
             Ok(mut data) => match data.pop() {
                 Some(conf) => conf,
                 None => {
@@ -585,10 +594,46 @@ fn parse_parameter_value_part(name: &str, part: &Hash) -> Result<String> {
 #[cfg(test)]
 mod test {
     use super::Config;
-    use std::{
-        collections::HashMap,
+    use crate::{assert_error, expect, vec_deq, verify_expectations};
+    use ::std::{
+        cell::RefCell,
+        collections::{HashMap, VecDeque},
         io::{Error, ErrorKind},
     };
+
+    struct TestExpectations {
+        std_fs_read_to_string: VecDeque<(&'static str, Result<String, Error>)>,
+    }
+
+    impl TestExpectations {
+        fn new() -> Self {
+            TestExpectations {
+                std_fs_read_to_string: vec_deq![],
+            }
+        }
+    }
+
+    thread_local! { static TEST_EXPECTATIONS: RefCell<TestExpectations> = RefCell::new(TestExpectations::new()) }
+
+    fn verify_expectations() {
+        verify_expectations!(
+            std::fs::read_to_string => TEST_EXPECTATIONS::std_fs_read_to_string,
+        );
+    }
+
+    pub mod std {
+        pub mod fs {
+            use super::super::TEST_EXPECTATIONS;
+            use crate::verify_expectation;
+            use ::std::{io::Result, path::Path};
+
+            pub fn read_to_string<P: AsRef<Path>>(path: P) -> Result<String> {
+                let path = path.as_ref().to_str().unwrap();
+
+                verify_expectation!(TEST_EXPECTATIONS::std_fs_read_to_string => std::fs::read_to_string { path })
+            }
+        }
+    }
 
     #[test]
     fn config_with_all_options_parsed_properly() {
@@ -1566,5 +1611,47 @@ mod test {
             "Failed to parse a value for `foo/bad` argument: \
                 value must be either a string or a number.",
         );
+    }
+
+    #[test]
+    fn from_file_returns_error_if_fs_read_to_string_fails() {
+        expect!(
+            TEST_EXPECTATIONS::std_fs_read_to_string:
+            { "/etc/config/my_vm.yml" =>
+                Err(::std::io::Error::new(::std::io::ErrorKind::Other, "read_to_string()")) },
+        );
+
+        assert_error!(
+            ErrorKind::Other,
+            "read_to_string()",
+            Config::from_file("/etc/config/my_vm.yml")
+        );
+
+        verify_expectations();
+    }
+
+    #[test]
+    fn from_file_returns_parsed_config_read_from_file() {
+        expect!(
+            TEST_EXPECTATIONS::std_fs_read_to_string:
+            { "/etc/config/my_vm.yml" => Ok(
+                "
+                launcher:
+                  binary: /bin/true
+                qemu:
+                - sda: /tmp/vm.qcow
+                "
+            .to_owned()) },
+        );
+
+        let config = Config::from_file("/etc/config/my_vm.yml").unwrap();
+
+        assert_eq!("/bin/true", config.get_qemu_binary_path());
+        assert_eq!(
+            vec!["-sda", "/tmp/vm.qcow", "-qmp", "stdio"],
+            config.get_command_line_options()
+        );
+
+        verify_expectations();
     }
 }
